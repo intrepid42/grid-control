@@ -1,4 +1,4 @@
-# | Copyright 2016-2017 Karlsruhe Institute of Technology
+# | Copyright 2016-2019 Karlsruhe Institute of Technology
 # |
 # | Licensed under the Apache License, Version 2.0 (the "License");
 # | you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 from grid_control.backends.aspect_cancel import CancelJobsWithProcess
 from grid_control.backends.aspect_status import CheckInfo, CheckJobsWithProcess, CheckStatus
-from grid_control.backends.backend_tools import ProcessCreatorAppendArguments
+from grid_control.backends.backend_tools import BackendError, ProcessCreatorAppendArguments
 from grid_control.job_db import Job
 from hpfwk import clear_current_exception
 from python_compat import imap
@@ -40,11 +40,17 @@ class CondorCheckJobs(CheckJobsWithProcess):
 				Job.READY: [1],          # idle (waiting for a machine to execute on)
 				Job.RUNNING: [2],
 				Job.WAITING: [0, 5, 7],  # unexpanded (never been run); DISABLED (on hold); suspended
+				Job.UNKNOWN: [-1],       # job status was no integer, e.g. 'undefined'
 			})
 
 	def _handle_error(self, proc):
-		if proc.status(timeout=0) and ('Failed to fetch ads' in proc.stderr.read_log()):
-			self._status = CheckStatus.ERROR
+		if proc.status(timeout=0):
+			stderr = proc.stderr.read_log()
+			if 'Failed to fetch ads' in stderr:
+				self._status = CheckStatus.ERROR
+			if 'Extra Info: You probably saw this error because the condor_schedd is not' in stderr:
+				self._log.log_process(proc, msg='condor_q failed:\n' + stderr)
+				raise BackendError('condor_schedd is not reachable.')
 		CheckJobsWithProcess._handle_error(self, proc)
 
 	def _parse(self, proc):
@@ -59,7 +65,11 @@ class CondorCheckJobs(CheckJobsWithProcess):
 				clear_current_exception()
 				continue
 			if key == 'JobStatus':
-				job_info[CheckInfo.RAW_STATUS] = int(value)
+				try:
+					job_info[CheckInfo.RAW_STATUS] = int(value)
+				except ValueError:
+					# e.g. 'undefined' -> set status to unknown
+					job_info[CheckInfo.RAW_STATUS] = -1
 			elif key == 'GlobalJobId':
 				job_info[CheckInfo.WMSID] = value.split('#')[1]
 				job_info[key] = value.strip('"')

@@ -1,5 +1,5 @@
 #!/bin/bash
-# | Copyright 2008-2016 Karlsruhe Institute of Technology
+# | Copyright 2008-2019 Karlsruhe Institute of Technology
 # |
 # | Licensed under the Apache License, Version 2.0 (the "License");
 # | you may not use this file except in compliance with the License.
@@ -443,7 +443,8 @@ url_exists() {
 			[ "$(basename $EXCMD)" == "lcg-ls" ] && URL="sfn://${1#gsiftp://}" || URL="$1"
 			print_and_eval "$EXCMD" "$URL";;
 		"srm://"*)
-			EXCMD="`getcommand lcg-ls srm-check-permissions`"
+			EXCMD="`getcommand gfal-ls lcg-ls srm-check-permissions`"
+
 			[ "$(basename $EXCMD)" == "lcg-ls" ] && EXCMD="$EXCMD -b -T srmv2"
 			print_and_eval "$EXCMD" "$1";;
 		"file://"*)
@@ -506,7 +507,9 @@ url_copy_single_local() {
 url_copy_single_srm() {
 	debug_helper $FUNCNAME "$@"
 	RESULT=1
-	if [ "$(basename `getcommand lcg-cp`)" == "lcg-cp" ]; then
+	EXCMD="`getcommand lcg-cp gfal-copy`"
+	echo "copy command is $EXCMD"
+	if [ "$(basename $EXCMD)" == "lcg-cp" ]; then
 		ARGS=""
 		# avoid using bdii: it is not configured at many sites (OSG)
 		if echo "$1" | grep "SFN=" > /dev/null; then
@@ -519,7 +522,14 @@ url_copy_single_srm() {
 		if [ $RESULT -gt 0 ]; then
 			url_rm "$2" # continue later with srmcp
 		fi
+	elif [ "$(basename $EXCMD)" == "gfal-copy" ]; then
+		print_and_eval "gfal-copy" "$1" "$2"
+		RESULT=$?
+		if [ $RESULT -gt 0 ]; then
+			url_rm "$2" # continue later with srmcp
+		fi
 	fi
+	# old fallback solution (before gfal-copy was implemented)
 	if [ $RESULT -gt 0 ]; then
 		if [ "$(basename `getcommand srmcp`)" == "srmcp" ]; then
 			print_and_eval "srmcp" "-2 -debug=true -streams_num=1" "$1" "$2"
